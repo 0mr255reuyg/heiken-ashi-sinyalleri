@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import requests
-import plotly.graph_objects as go
+import json
 from datetime import datetime, timezone, timedelta
 
 st.set_page_config(
@@ -38,13 +38,12 @@ EK_HISSELER = [
 ALL_STOCKS = BIST100 + [s for s in EK_HISSELER if s not in BIST100]
 
 # ════════════════════════════════════════════════════════════════════════════
-# VERİ ÇEKME — requests ile Yahoo Finance
+# VERİ ÇEKME
 # ════════════════════════════════════════════════════════════════════════════
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
     "Accept": "application/json",
-    "Accept-Language": "en-US,en;q=0.9",
 }
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -52,25 +51,23 @@ def fetch_ohlc(ticker, gun=365):
     try:
         now   = int(datetime.now(timezone.utc).timestamp())
         start = int((datetime.now(timezone.utc) - timedelta(days=gun)).timestamp())
-        url   = f"https://query2.finance.yahoo.com/v8/finance/chart/{ticker}.IS?period1={start}&period2={now}&interval=1d"
+        url   = (f"https://query2.finance.yahoo.com/v8/finance/chart/{ticker}.IS"
+                 f"?period1={start}&period2={now}&interval=1d")
         r     = requests.get(url, headers=HEADERS, timeout=20)
         data  = r.json()
         res   = data["chart"]["result"][0]
         q     = res["indicators"]["quote"][0]
         idx   = pd.to_datetime(res["timestamp"], unit="s").normalize()
         df    = pd.DataFrame({
-            "Open":   q["open"],
-            "High":   q["high"],
-            "Low":    q["low"],
-            "Close":  q["close"],
-            "Volume": q["volume"],
+            "Open": q["open"], "High": q["high"],
+            "Low":  q["low"],  "Close": q["close"],
         }, index=idx)
         return df.dropna()
     except Exception:
         return pd.DataFrame()
 
 # ════════════════════════════════════════════════════════════════════════════
-# ALGORİTMA — Smoothed Heiken Ashi EMA10 / Smooth14
+# ALGORİTMA
 # ════════════════════════════════════════════════════════════════════════════
 
 def ema(s, n):
@@ -82,24 +79,17 @@ def compute_signals(df):
     c = ema(df["Close"], 10)
     h = ema(df["High"],  10)
     l = ema(df["Low"],   10)
-
     haclose = (o + h + l + c) / 4
     haopen  = haclose.copy()
     haopen.iloc[0] = (o.iloc[0] + c.iloc[0]) / 2
     for i in range(1, len(haopen)):
         haopen.iloc[i] = (haopen.iloc[i-1] + haclose.iloc[i-1]) / 2
-
-    o2 = ema(haopen,  14)
+    o2 = ema(haopen, 14)
     c2 = ema(haclose, 14)
-
-    col      = (c2 > o2).astype(int)
-    col_prev = col.shift(1)
-
+    col = (c2 > o2).astype(int)
     df["sha_color"]    = col
-    df["long_signal"]  = (col == 1) & (col_prev == 0)
-    df["short_signal"] = (col == 0) & (col_prev == 1)
-    df["o2"] = o2
-    df["c2"] = c2
+    df["long_signal"]  = (col == 1) & (col.shift(1) == 0)
+    df["short_signal"] = (col == 0) & (col.shift(1) == 1)
     return df
 
 def is_gunu_once(dt):
@@ -113,15 +103,13 @@ def is_gunu_once(dt):
         return None
 
 def get_signals_info(df):
-    long_idx  = df.index[df["long_signal"]].tolist()
-    short_idx = df.index[df["short_signal"]].tolist()
-    ll = long_idx[-1]  if long_idx  else None
-    ls = short_idx[-1] if short_idx else None
+    li = df.index[df["long_signal"]].tolist()
+    si = df.index[df["short_signal"]].tolist()
+    ll = li[-1] if li else None
+    ls = si[-1] if si else None
     return {
-        "last_long":       ll,
-        "last_long_days":  is_gunu_once(ll),
-        "last_short":      ls,
-        "last_short_days": is_gunu_once(ls),
+        "last_long": ll, "last_long_days": is_gunu_once(ll),
+        "last_short": ls, "last_short_days": is_gunu_once(ls),
     }
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -134,59 +122,72 @@ def tara_hepsini(tickers):
         df   = compute_signals(df)
         info = get_signals_info(df)
         rows.append({
-            "Hisse":      ticker,
-            "Son Long":   pd.Timestamp(info["last_long"]).date()  if info["last_long"]  else None,
-            "Long İG":    info["last_long_days"],
-            "Son Short":  pd.Timestamp(info["last_short"]).date() if info["last_short"] else None,
-            "Short İG":   info["last_short_days"],
+            "Hisse":     ticker,
+            "Son Long":  pd.Timestamp(info["last_long"]).date()  if info["last_long"]  else None,
+            "Long İG":   info["last_long_days"],
+            "Son Short": pd.Timestamp(info["last_short"]).date() if info["last_short"] else None,
+            "Short İG":  info["last_short_days"],
         })
     return pd.DataFrame(rows)
 
 # ════════════════════════════════════════════════════════════════════════════
-# GRAFİK
+# GRAFİK — TradingView Lightweight Charts (JS, sıfır Python bağımlılığı)
 # ════════════════════════════════════════════════════════════════════════════
 
 def grafik_ciz(df, ticker):
-    fig = go.Figure()
-    fig.add_trace(go.Candlestick(
-        x=df.index,
-        open=df["Open"], high=df["High"],
-        low=df["Low"],   close=df["Close"],
-        name="Fiyat",
-        increasing_line_color="#26a69a", decreasing_line_color="#ef5350",
-        increasing_fillcolor="#26a69a",  decreasing_fillcolor="#ef5350",
-    ))
-    long_df = df[df["long_signal"]]
-    if not long_df.empty:
-        fig.add_trace(go.Scatter(
-            x=long_df.index, y=long_df["Low"] * 0.982,
-            mode="markers",
-            marker=dict(symbol="triangle-up", color="#00e676", size=14,
-                        line=dict(color="#00c853", width=1)),
-            name="Long",
-            hovertemplate="<b>▲ LONG</b><br>%{x|%d.%m.%Y}<extra></extra>",
-        ))
-    short_df = df[df["short_signal"]]
-    if not short_df.empty:
-        fig.add_trace(go.Scatter(
-            x=short_df.index, y=short_df["High"] * 1.018,
-            mode="markers",
-            marker=dict(symbol="triangle-down", color="#ff1744", size=14,
-                        line=dict(color="#d50000", width=1)),
-            name="Short",
-            hovertemplate="<b>▼ SHORT</b><br>%{x|%d.%m.%Y}<extra></extra>",
-        ))
-    fig.update_layout(
-        title=f"<b>{ticker}</b>  —  SHA (EMA 10 / Smooth 14)",
-        xaxis_rangeslider_visible=False,
-        plot_bgcolor="#131722", paper_bgcolor="#131722",
-        font=dict(color="#d1d4dc"),
-        xaxis=dict(gridcolor="#1e222d"),
-        yaxis=dict(gridcolor="#1e222d", title="Fiyat (TL)"),
-        height=580, margin=dict(l=10, r=10, t=50, b=10),
-        legend=dict(orientation="h", y=1.02, x=1, xanchor="right"),
-    )
-    return fig
+    candles = []
+    longs   = []
+    shorts  = []
+
+    for ts, row in df.iterrows():
+        t = int(pd.Timestamp(ts).timestamp())
+        candles.append({
+            "time": t,
+            "open":  round(float(row["Open"]),  4),
+            "high":  round(float(row["High"]),  4),
+            "low":   round(float(row["Low"]),   4),
+            "close": round(float(row["Close"]), 4),
+        })
+        if row.get("long_signal"):
+            longs.append({"time": t, "position": "belowBar", "color": "#00e676",
+                          "shape": "arrowUp", "text": "L", "size": 1})
+        if row.get("short_signal"):
+            shorts.append({"time": t, "position": "aboveBar", "color": "#ff1744",
+                           "shape": "arrowDown", "text": "S", "size": 1})
+
+    markers = sorted(longs + shorts, key=lambda x: x["time"])
+
+    html = f"""
+    <div id="chart_{ticker}" style="width:100%;height:520px;background:#131722;border-radius:8px"></div>
+    <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
+    <script>
+    (function() {{
+        var el = document.getElementById('chart_{ticker}');
+        var chart = LightweightCharts.createChart(el, {{
+            width: el.offsetWidth,
+            height: 520,
+            layout: {{ background: {{ color: '#131722' }}, textColor: '#d1d4dc' }},
+            grid: {{
+                vertLines: {{ color: '#1e222d' }},
+                horzLines: {{ color: '#1e222d' }},
+            }},
+            timeScale: {{ timeVisible: true, borderColor: '#2a2d3e' }},
+            rightPriceScale: {{ borderColor: '#2a2d3e' }},
+        }});
+        var series = chart.addCandlestickSeries({{
+            upColor: '#26a69a', downColor: '#ef5350',
+            borderUpColor: '#26a69a', borderDownColor: '#ef5350',
+            wickUpColor: '#26a69a', wickDownColor: '#ef5350',
+        }});
+        series.setData({json.dumps(candles)});
+        series.setMarkers({json.dumps(markers)});
+        window.addEventListener('resize', function() {{
+            chart.applyOptions({{ width: el.offsetWidth }});
+        }});
+    }})();
+    </script>
+    """
+    st.components.v1.html(html, height=540)
 
 # ════════════════════════════════════════════════════════════════════════════
 # CSS
@@ -278,8 +279,6 @@ if page == "📊 Sinyal Tarayıcı":
 
     st.divider()
 
-    col_l, col_s = st.columns(2)
-
     def rl(val):
         if pd.isna(val): return ""
         if val == 0:  return "background:#0d4429;color:#3fb950;font-weight:700"
@@ -294,6 +293,7 @@ if page == "📊 Sinyal Tarayıcı":
         if val <= 7:  return "background:#1f0d0d;color:#ffa198"
         return ""
 
+    col_l, col_s = st.columns(2)
     with col_l:
         st.markdown("### 🟢 Long Sinyaller")
         if long_list.empty:
@@ -372,7 +372,7 @@ elif page == "🔍 Hisse Detayı":
                     f'{"🟢 LONG" if sha==1 else "🔴 SHORT"}</div></div>', unsafe_allow_html=True)
 
     st.divider()
-    st.plotly_chart(grafik_ciz(sig, secilen), use_container_width=True)
+    grafik_ciz(sig, secilen)
 
     with st.expander("📅 Tüm Sinyal Tarihleri"):
         g1, g2 = st.columns(2)
