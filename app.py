@@ -1,11 +1,15 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import plotly.graph_objects as go
 import requests
 from datetime import date
 
-# ── Sayfa ayarları ──────────────────────────────────────────────────────────
+try:
+    import plotly.graph_objects as go
+    HAS_PLOTLY = True
+except ImportError:
+    HAS_PLOTLY = False
+
 st.set_page_config(
     page_title="BIST Sinyal Tarayıcı",
     page_icon="📈",
@@ -18,26 +22,25 @@ st.set_page_config(
 # ════════════════════════════════════════════════════════════════════════════
 
 BIST100_STOCKS = [
-    "AGHOL", "AGROT", "AHGAZ", "AKBNK", "AKSA", "AKSEN", "ALARK", "ALFAS",
-    "ALTNY", "ANSGR", "AEFES", "ANHYT", "ARCLK", "ARDYZ", "ASELS", "ASTOR",
-    "AVPGY", "BTCIM", "BSOKE", "BERA", "BIMAS", "BRSAN", "BRYAT", "CCOLA",
-    "CWENE", "CANTE", "CLEBI", "CIMSA", "DOHOL", "DOAS", "EFORC", "ECILC",
-    "EKGYO", "ENJSA", "ENERY", "ENKAI", "EREGL", "EUPWR", "FROTO", "GSRAY",
-    "GESAN", "GOLTS", "GRTHO", "GUBRF", "SAHOL", "HEKTS", "IEYHO", "ISMEN",
-    "KRDMD", "KARSN", "KTLEV", "KCHOL", "KONTR", "KONYA", "KOZAL", "KOZAA",
-    "LMKDC", "MAGEN", "MAVI", "MIATK", "MGROS", "MPARK", "OBAMS", "ODAS",
-    "OTKAR", "OYAKC", "PASEU", "PGSUS", "PETKM", "RALYH", "REEDR", "RYGYO",
-    "SASA", "SELEC", "SMRTG", "SKBNK", "SOKM", "TABGD", "TAVHL", "TKFEN",
-    "TOASO", "TCELL", "TUPRS", "THYAO", "GARAN", "HALKB", "ISCTR", "TSKB",
-    "TURSG", "SISE", "VAKBN", "TTKOM", "VESTL", "YKBNK", "CVKMD", "ZOREN",
+    "AGHOL","AGROT","AHGAZ","AKBNK","AKSA","AKSEN","ALARK","ALFAS",
+    "ALTNY","ANSGR","AEFES","ANHYT","ARCLK","ARDYZ","ASELS","ASTOR",
+    "AVPGY","BTCIM","BSOKE","BERA","BIMAS","BRSAN","BRYAT","CCOLA",
+    "CWENE","CANTE","CLEBI","CIMSA","DOHOL","DOAS","EFORC","ECILC",
+    "EKGYO","ENJSA","ENERY","ENKAI","EREGL","EUPWR","FROTO","GSRAY",
+    "GESAN","GOLTS","GRTHO","GUBRF","SAHOL","HEKTS","IEYHO","ISMEN",
+    "KRDMD","KARSN","KTLEV","KCHOL","KONTR","KONYA","KOZAL","KOZAA",
+    "LMKDC","MAGEN","MAVI","MIATK","MGROS","MPARK","OBAMS","ODAS",
+    "OTKAR","OYAKC","PASEU","PGSUS","PETKM","RALYH","REEDR","RYGYO",
+    "SASA","SELEC","SMRTG","SKBNK","SOKM","TABGD","TAVHL","TKFEN",
+    "TOASO","TCELL","TUPRS","THYAO","GARAN","HALKB","ISCTR","TSKB",
+    "TURSG","SISE","VAKBN","TTKOM","VESTL","YKBNK","CVKMD","ZOREN",
     "PRKAB",
 ]
 
-# Ek hisseler — BIST 100'de olmayanlar
 CUSTOM_EXTRA = [
-    "AKFYE", "ASGR", "ORGE", "HTTBT", "SDTTR",
-    "OYYAT", "NETCAD", "VBTYZ", "EGEGY", "RYSAS",
-    "TGSAS", "ATATP", "YEOTK", "KCAER",
+    "AKFYE","ASGR","ORGE","HTTBT","SDTTR",
+    "OYYAT","NETCAD","VBTYZ","EGEGY","RYSAS",
+    "TGSAS","ATATP","YEOTK","KCAER",
 ]
 
 ALL_STOCKS = list(BIST100_STOCKS)
@@ -47,16 +50,14 @@ for s in CUSTOM_EXTRA:
 ALL_STOCKS = sorted(ALL_STOCKS)
 
 # ════════════════════════════════════════════════════════════════════════════
-# ALGORİTMA — SMOOTHED HEİKEN ASHİ  (EMA 10 / Smoothing 14)
+# ALGORİTMA
 # ════════════════════════════════════════════════════════════════════════════
 
-EMA_LEN   = 10
+EMA_LEN    = 10
 SMOOTH_LEN = 14
-
 
 def ema(series, length):
     return series.ewm(span=length, adjust=False).mean()
-
 
 def compute_signals(df):
     df = df.copy()
@@ -73,17 +74,13 @@ def compute_signals(df):
 
     o2 = ema(haopen,  SMOOTH_LEN)
     c2 = ema(haclose, SMOOTH_LEN)
-
     col      = (c2 > o2).astype(int)
     col_prev = col.shift(1)
 
     df["sha_color"]    = col
-    df["sha_o2"]       = o2
-    df["sha_c2"]       = c2
     df["long_signal"]  = (col == 1) & (col_prev == 0)
     df["short_signal"] = (col == 0) & (col_prev == 1)
     return df
-
 
 def get_latest_signals(df):
     today = pd.Timestamp.now(tz="UTC").normalize()
@@ -110,7 +107,6 @@ def get_latest_signals(df):
         "last_short_days": days_ago(last_short),
     }
 
-
 # ════════════════════════════════════════════════════════════════════════════
 # VERİ ÇEKME
 # ════════════════════════════════════════════════════════════════════════════
@@ -118,36 +114,26 @@ def get_latest_signals(df):
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_ohlc(ticker, period="1y"):
     try:
-        period_map = {"3mo": 90, "6mo": 180, "1y": 365, "2y": 730}
-        days = period_map.get(period, 365)
+        period_days = {"3mo": 90, "6mo": 180, "1y": 365, "2y": 730}
+        days  = period_days.get(period, 365)
         end   = int(pd.Timestamp.now().timestamp())
         start = int((pd.Timestamp.now() - pd.Timedelta(days=days)).timestamp())
-
-        url = (
+        url   = (
             f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}.IS"
             f"?period1={start}&period2={end}&interval=1d&events=history"
         )
-        headers = {"User-Agent": "Mozilla/5.0"}
-        r = requests.get(url, headers=headers, timeout=15)
+        r    = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
         data = r.json()
-
-        result = data["chart"]["result"][0]
-        ts     = result["timestamp"]
-        ohlcv  = result["indicators"]["quote"][0]
-
-        df = pd.DataFrame({
-            "Open":   ohlcv["open"],
-            "High":   ohlcv["high"],
-            "Low":    ohlcv["low"],
-            "Close":  ohlcv["close"],
-            "Volume": ohlcv["volume"],
-        }, index=pd.to_datetime(ts, unit="s"))
-
+        res  = data["chart"]["result"][0]
+        q    = res["indicators"]["quote"][0]
+        df   = pd.DataFrame({
+            "Open": q["open"], "High": q["high"],
+            "Low":  q["low"],  "Close": q["close"], "Volume": q["volume"],
+        }, index=pd.to_datetime(res["timestamp"], unit="s"))
         df.index = df.index.normalize()
         return df.dropna()
     except Exception:
         return pd.DataFrame()
-
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_all_signals(tickers):
@@ -156,7 +142,7 @@ def fetch_all_signals(tickers):
         df = fetch_ohlc(ticker, period="6mo")
         if df.empty or len(df) < 30:
             continue
-        df = compute_signals(df)
+        df   = compute_signals(df)
         info = get_latest_signals(df)
         rows.append({
             "Hisse":            ticker,
@@ -167,14 +153,16 @@ def fetch_all_signals(tickers):
         })
     return pd.DataFrame(rows)
 
-
 # ════════════════════════════════════════════════════════════════════════════
 # GRAFİK
 # ════════════════════════════════════════════════════════════════════════════
 
 def build_chart(df, ticker):
-    fig = go.Figure()
+    if not HAS_PLOTLY:
+        st.warning("Plotly yüklenemedi, grafik gösterilemiyor.")
+        return
 
+    fig = go.Figure()
     fig.add_trace(go.Candlestick(
         x=df.index,
         open=df["Open"], high=df["High"],
@@ -209,19 +197,16 @@ def build_chart(df, ticker):
         ))
 
     fig.update_layout(
-        title=dict(text=f"<b>{ticker}</b> — Smoothed Heiken Ashi Sinyalleri",
-                   font=dict(size=18)),
+        title=dict(text=f"<b>{ticker}</b> — Smoothed Heiken Ashi Sinyalleri", font=dict(size=18)),
         xaxis_rangeslider_visible=False,
         plot_bgcolor="#0e1117", paper_bgcolor="#0e1117",
         font=dict(color="#fafafa"),
         xaxis=dict(gridcolor="#1f2937"),
         yaxis=dict(gridcolor="#1f2937", title="Fiyat (TL)"),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        height=560,
-        margin=dict(l=10, r=10, t=60, b=10),
+        height=560, margin=dict(l=10, r=10, t=60, b=10),
     )
-    return fig
-
+    st.plotly_chart(fig, use_container_width=True)
 
 # ════════════════════════════════════════════════════════════════════════════
 # CSS
@@ -231,22 +216,21 @@ st.markdown("""
 <style>
 .stApp { background-color: #0e1117; }
 .metric-box {
-    background: #1a1d23; border-radius: 10px;
-    padding: 14px 18px; text-align: center;
-    border: 1px solid #2a2d35; margin-bottom: 4px;
+    background:#1a1d23; border-radius:10px;
+    padding:14px 18px; text-align:center;
+    border:1px solid #2a2d35; margin-bottom:4px;
 }
-.metric-label { color: #9ca3af; font-size: 13px; margin-bottom: 4px; }
-.metric-value { font-size: 26px; font-weight: 700; }
-.long-val  { color: #22c55e; }
-.short-val { color: #ef4444; }
+.metric-label { color:#9ca3af; font-size:13px; margin-bottom:4px; }
+.metric-value { font-size:26px; font-weight:700; }
+.long-val  { color:#22c55e; }
+.short-val { color:#ef4444; }
 .tag-long  { background:#14532d; color:#86efac; border-radius:6px;
              padding:3px 10px; font-size:13px; display:inline-block; margin:2px; }
 .tag-short { background:#7f1d1d; color:#fca5a5; border-radius:6px;
              padding:3px 10px; font-size:13px; display:inline-block; margin:2px; }
-.block-container { padding-top: 1.5rem !important; }
+.block-container { padding-top:1.5rem !important; }
 </style>
 """, unsafe_allow_html=True)
-
 
 # ════════════════════════════════════════════════════════════════════════════
 # SIDEBAR
@@ -264,7 +248,6 @@ with st.sidebar:
     if st.button("🔄 Verileri Yenile", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
-
 
 # ════════════════════════════════════════════════════════════════════════════
 # SAYFA 1 — SİNYAL TARAYICI
@@ -331,20 +314,15 @@ if page == "📊 Sinyal Tarayıcı":
         return ""
 
     with tab1:
-        disp = long_df_f.sort_values("Long (Gün Önce)")[["Hisse", "Son Long", "Long (Gün Önce)"]].rename(
-            columns={"Long (Gün Önce)": "Gün Önce"})
-        st.dataframe(disp.style.applymap(color_long, subset=["Gün Önce"]),
-                     use_container_width=True, hide_index=True)
+        disp = long_df_f.sort_values("Long (Gün Önce)")[["Hisse","Son Long","Long (Gün Önce)"]].rename(columns={"Long (Gün Önce)":"Gün Önce"})
+        st.dataframe(disp.style.applymap(color_long, subset=["Gün Önce"]), use_container_width=True, hide_index=True)
 
     with tab2:
-        disp_s = short_df_f.sort_values("Short (Gün Önce)")[["Hisse", "Son Short", "Short (Gün Önce)"]].rename(
-            columns={"Short (Gün Önce)": "Gün Önce"})
-        st.dataframe(disp_s.style.applymap(color_short, subset=["Gün Önce"]),
-                     use_container_width=True, hide_index=True)
+        disp_s = short_df_f.sort_values("Short (Gün Önce)")[["Hisse","Son Short","Short (Gün Önce)"]].rename(columns={"Short (Gün Önce)":"Gün Önce"})
+        st.dataframe(disp_s.style.applymap(color_short, subset=["Gün Önce"]), use_container_width=True, hide_index=True)
 
     with tab3:
         st.dataframe(scan_df, use_container_width=True, hide_index=True)
-
 
 # ════════════════════════════════════════════════════════════════════════════
 # SAYFA 2 — HİSSE DETAYI
@@ -384,21 +362,21 @@ elif page == "🔍 Hisse Detayı":
                     f'<div style="font-size:13px;color:#9ca3af">{sign}{change_pct:.2f}%</div></div>',
                     unsafe_allow_html=True)
     with m2:
-        ld = info["last_long_days"]
-        dt = info["last_long"].date().strftime("%d.%m.%Y") if info["last_long"] else "—"
+        ld  = info["last_long_days"]
+        dt  = info["last_long"].date().strftime("%d.%m.%Y") if info["last_long"] else "—"
         val = f"{ld} gün önce" if ld is not None else "—"
         st.markdown(f'<div class="metric-box"><div class="metric-label">Son Long Sinyali</div>'
                     f'<div class="metric-value long-val">{val}</div>'
                     f'<div style="font-size:12px;color:#9ca3af">{dt}</div></div>', unsafe_allow_html=True)
     with m3:
-        sd = info["last_short_days"]
-        dt_s = info["last_short"].date().strftime("%d.%m.%Y") if info["last_short"] else "—"
+        sd    = info["last_short_days"]
+        dt_s  = info["last_short"].date().strftime("%d.%m.%Y") if info["last_short"] else "—"
         val_s = f"{sd} gün önce" if sd is not None else "—"
         st.markdown(f'<div class="metric-box"><div class="metric-label">Son Short Sinyali</div>'
                     f'<div class="metric-value short-val">{val_s}</div>'
                     f'<div style="font-size:12px;color:#9ca3af">{dt_s}</div></div>', unsafe_allow_html=True)
     with m4:
-        cur = sig_df["sha_color"].iloc[-1]
+        cur   = sig_df["sha_color"].iloc[-1]
         label = "🟢 LONG" if cur == 1 else "🔴 SHORT"
         cls   = "long-val" if cur == 1 else "short-val"
         st.markdown(f'<div class="metric-box"><div class="metric-label">Güncel SHA Rengi</div>'
@@ -406,7 +384,7 @@ elif page == "🔍 Hisse Detayı":
                     unsafe_allow_html=True)
 
     st.divider()
-    st.plotly_chart(build_chart(sig_df, selected), use_container_width=True)
+    build_chart(sig_df, selected)
 
     with st.expander("📅 Sinyal Geçmişi"):
         long_dates  = sig_df.index[sig_df["long_signal"]].strftime("%d.%m.%Y").tolist()
@@ -420,7 +398,6 @@ elif page == "🔍 Hisse Detayı":
             st.markdown("**🔴 Short / Çıkış Sinyalleri**")
             for d in reversed(short_dates):
                 st.markdown(f'<span class="tag-short">▼ {d}</span>', unsafe_allow_html=True)
-
 
 # ════════════════════════════════════════════════════════════════════════════
 # SAYFA 3 — HABERLER & KAP
@@ -457,9 +434,9 @@ elif page == "📰 Haberler & KAP":
 
         col1, col2, col3 = st.columns(3)
         for col, label, icon, url, sub in [
-            (col1, "İş Yatırım",    "🏦", isyat_url,  "Şirket Kartı"),
-            (col2, "Mynet Finans",  "📰", mynet_url,  "Haber Akışı"),
-            (col3, "Google Haberler","🔍",google_url, "Son haberler"),
+            (col1, "İş Yatırım",     "🏦", isyat_url,  "Şirket Kartı"),
+            (col2, "Mynet Finans",   "📰", mynet_url,  "Haber Akışı"),
+            (col3, "Google Haberler","🔍", google_url, "Son haberler"),
         ]:
             with col:
                 st.markdown(f"""
