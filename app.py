@@ -1,8 +1,8 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import yfinance as yf
 import plotly.graph_objects as go
+import requests
 from datetime import date
 
 # ── Sayfa ayarları ──────────────────────────────────────────────────────────
@@ -118,14 +118,33 @@ def get_latest_signals(df):
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_ohlc(ticker, period="1y"):
     try:
-        df = yf.download(f"{ticker}.IS", period=period, interval="1d",
-                         auto_adjust=True, progress=False)
-        if df.empty:
-            return pd.DataFrame()
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
-        df.index = pd.to_datetime(df.index)
-        return df[["Open", "High", "Low", "Close", "Volume"]].dropna()
+        period_map = {"3mo": 90, "6mo": 180, "1y": 365, "2y": 730}
+        days = period_map.get(period, 365)
+        end   = int(pd.Timestamp.now().timestamp())
+        start = int((pd.Timestamp.now() - pd.Timedelta(days=days)).timestamp())
+
+        url = (
+            f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}.IS"
+            f"?period1={start}&period2={end}&interval=1d&events=history"
+        )
+        headers = {"User-Agent": "Mozilla/5.0"}
+        r = requests.get(url, headers=headers, timeout=15)
+        data = r.json()
+
+        result = data["chart"]["result"][0]
+        ts     = result["timestamp"]
+        ohlcv  = result["indicators"]["quote"][0]
+
+        df = pd.DataFrame({
+            "Open":   ohlcv["open"],
+            "High":   ohlcv["high"],
+            "Low":    ohlcv["low"],
+            "Close":  ohlcv["close"],
+            "Volume": ohlcv["volume"],
+        }, index=pd.to_datetime(ts, unit="s"))
+
+        df.index = df.index.normalize()
+        return df.dropna()
     except Exception:
         return pd.DataFrame()
 
