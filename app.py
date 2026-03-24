@@ -32,7 +32,7 @@ BIST100 = [
 EK_HISSELER = [
     "AKFYE","ASGR","ORGE","HTTBT","SDTTR",
     "OYYAT","NETCAD","VBTYZ","EGEGY","RYSAS",
-    "TGSAS","ATATP","KCAER",
+    "TGSAS","ATATP","KCAER","A1CAP",
 ]
 
 ALL_STOCKS = BIST100 + [s for s in EK_HISSELER if s not in BIST100]
