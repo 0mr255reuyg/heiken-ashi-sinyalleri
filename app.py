@@ -108,8 +108,10 @@ def get_signals_info(df):
     ll = li[-1] if li else None
     ls = si[-1] if si else None
     return {
-        "last_long": ll, "last_long_days": is_gunu_once(ll),
-        "last_short": ls, "last_short_days": is_gunu_once(ls),
+        "last_long":       ll,
+        "last_long_days":  is_gunu_once(ll),
+        "last_short":      ls,
+        "last_short_days": is_gunu_once(ls),
     }
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -121,17 +123,40 @@ def tara_hepsini(tickers):
             continue
         df   = compute_signals(df)
         info = get_signals_info(df)
+
+        ll = info["last_long"]
+        ls = info["last_short"]
+        ld = info["last_long_days"]
+        sd = info["last_short_days"]
+
+        # En son hangi sinyal geldiyse o geçerli —
+        # ikisi de varsa tarihi daha yeni olanı al
+        if ll is not None and ls is not None:
+            if ll >= ls:
+                # Son sinyal LONG → sadece long tarafında göster
+                aktif = "long"
+            else:
+                # Son sinyal SHORT → sadece short tarafında göster
+                aktif = "short"
+        elif ll is not None:
+            aktif = "long"
+        elif ls is not None:
+            aktif = "short"
+        else:
+            aktif = None
+
         rows.append({
             "Hisse":     ticker,
-            "Son Long":  pd.Timestamp(info["last_long"]).date()  if info["last_long"]  else None,
-            "Long İG":   info["last_long_days"],
-            "Son Short": pd.Timestamp(info["last_short"]).date() if info["last_short"] else None,
-            "Short İG":  info["last_short_days"],
+            "Son Long":  pd.Timestamp(ll).date() if ll else None,
+            "Long İG":   ld if aktif == "long" else None,
+            "Son Short": pd.Timestamp(ls).date() if ls else None,
+            "Short İG":  sd if aktif == "short" else None,
+            "Aktif":     aktif,
         })
     return pd.DataFrame(rows)
 
 # ════════════════════════════════════════════════════════════════════════════
-# GRAFİK — TradingView Lightweight Charts (JS, sıfır Python bağımlılığı)
+# GRAFİK — TradingView Lightweight Charts
 # ════════════════════════════════════════════════════════════════════════════
 
 def grafik_ciz(df, ticker):
@@ -142,7 +167,7 @@ def grafik_ciz(df, ticker):
     for ts, row in df.iterrows():
         t = int(pd.Timestamp(ts).timestamp())
         candles.append({
-            "time": t,
+            "time":  t,
             "open":  round(float(row["Open"]),  4),
             "high":  round(float(row["High"]),  4),
             "low":   round(float(row["Low"]),   4),
@@ -164,13 +189,9 @@ def grafik_ciz(df, ticker):
     (function() {{
         var el = document.getElementById('chart_{ticker}');
         var chart = LightweightCharts.createChart(el, {{
-            width: el.offsetWidth,
-            height: 520,
+            width: el.offsetWidth, height: 520,
             layout: {{ background: {{ color: '#131722' }}, textColor: '#d1d4dc' }},
-            grid: {{
-                vertLines: {{ color: '#1e222d' }},
-                horzLines: {{ color: '#1e222d' }},
-            }},
+            grid: {{ vertLines: {{ color: '#1e222d' }}, horzLines: {{ color: '#1e222d' }} }},
             timeScale: {{ timeVisible: true, borderColor: '#2a2d3e' }},
             rightPriceScale: {{ borderColor: '#2a2d3e' }},
         }});
@@ -239,7 +260,7 @@ with st.sidebar:
 
 if page == "📊 Sinyal Tarayıcı":
     st.title("📊 Sinyal Tarayıcı")
-    st.caption("EMA 10  |  Smoothing 14  |  İG = İş Günü")
+    st.caption("EMA 10  |  Smoothing 14  |  İG = İş Günü  |  Her hisse sadece son sinyalinin tarafında görünür")
 
     f1, f2 = st.columns(2)
     with f1:
@@ -259,8 +280,18 @@ if page == "📊 Sinyal Tarayıcı":
     elif grup == "Ek Hisseler":
         df_tara = df_tara[df_tara["Hisse"].isin(EK_HISSELER)]
 
-    long_list  = df_tara[df_tara["Long İG"].notna()  & (df_tara["Long İG"]  <= gun_filtre)].sort_values("Long İG")
-    short_list = df_tara[df_tara["Short İG"].notna() & (df_tara["Short İG"] <= gun_filtre)].sort_values("Short İG")
+    # Sadece aktif sinyali gün filtresine sok
+    long_list  = df_tara[
+        (df_tara["Aktif"] == "long") &
+        df_tara["Long İG"].notna() &
+        (df_tara["Long İG"] <= gun_filtre)
+    ].sort_values("Long İG")
+
+    short_list = df_tara[
+        (df_tara["Aktif"] == "short") &
+        df_tara["Short İG"].notna() &
+        (df_tara["Short İG"] <= gun_filtre)
+    ].sort_values("Short İG")
 
     m1, m2, m3, m4 = st.columns(4)
     with m1:
@@ -270,7 +301,7 @@ if page == "📊 Sinyal Tarayıcı":
         st.markdown(f'<div class="mbox"><div class="mlabel">Short (son {gun_filtre} İG)</div>'
                     f'<div class="mval red">{len(short_list)}</div></div>', unsafe_allow_html=True)
     with m3:
-        bugun = df_tara[df_tara["Long İG"] == 0]
+        bugun = long_list[long_list["Long İG"] == 0]
         st.markdown(f'<div class="mbox"><div class="mlabel">Bugün Long</div>'
                     f'<div class="mval purple">{len(bugun)}</div></div>', unsafe_allow_html=True)
     with m4:
@@ -315,7 +346,8 @@ if page == "📊 Sinyal Tarayıcı":
                          height=min(600, 35*len(d)+38))
 
     with st.expander("📋 Tüm Hisseler"):
-        st.dataframe(df_tara, use_container_width=True, hide_index=True)
+        st.dataframe(df_tara[["Hisse","Son Long","Long İG","Son Short","Short İG","Aktif"]],
+                     use_container_width=True, hide_index=True)
 
 # ════════════════════════════════════════════════════════════════════════════
 # SAYFA 2 — HİSSE DETAYI
@@ -329,7 +361,7 @@ elif page == "🔍 Hisse Detayı":
         secilen = st.selectbox("Hisse", ALL_STOCKS,
                                index=ALL_STOCKS.index("THYAO") if "THYAO" in ALL_STOCKS else 0)
     with c2:
-        dm = {"3 Ay":90,"6 Ay":180,"1 Yıl":365,"2 Yıl":730}
+        dm  = {"3 Ay":90,"6 Ay":180,"1 Yıl":365,"2 Yıl":730}
         gun = dm[st.selectbox("Dönem", list(dm.keys()), index=2)]
 
     with st.spinner(f"{secilen} yükleniyor..."):
